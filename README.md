@@ -10,5 +10,6 @@ This project takes a MIDI input from a keyboard or other midi device and process
 Each LLM I have trained is a tranfomer model based on Mistral architecture. These have been trained from scratch. 
 The tokens are encoded using a custom MidiTok Remi encoding. 
 
-[Single instrument trained model] (https://huggingface.co/adricl/midi_single_instrument_mistral_transformer)
-[Multi instrument trained model] (https://huggingface.co/adricl/music_transformer_playground)
+[Single instrument trained model](https://huggingface.co/adricl/midi_single_instrument_mistral_transformer)
+
+[Multi instrument trained model](https://huggingface.co/adricl/music_transformer_playground)
