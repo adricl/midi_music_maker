@@ -15,8 +15,10 @@ import os
 import errno
 import time
 from pathlib import Path
+from io import BytesIO
 import argparse
 import torch
+import mido
 from symusic import Score
 from miditok import REMI
 from transformers import AutoModelForCausalLM, GenerationConfig, AutoConfig
@@ -86,9 +88,83 @@ def pipe_to_midi(pipe_name):
         print("Pipe removed")
         exit(0)
 
-def midi_input_to_midi():
-    print("Waiting for midi input")
+def find_midi_device():
+    print("Searching for MIDI devices...")
+    input_ports = mido.get_input_names()
+    
+    for port in input_ports:
+        print(f"Found MIDI input port: {port}")
+        if "USB" in port:
+            print(f"Using MIDI input port: {port}")
+            return port
+        
+    print("No suitable MIDI input device found.")
+    exit(1)
 
+def midi_input_to_midi():
+    print("Waiting for midi input...")
+    
+    port_name = find_midi_device()
+    
+    try:
+        with mido.open_input(port_name) as inport:
+            print("MIDI device connected! Start playing...")
+            
+            # Create a MIDI file to collect messages
+            midi_file = mido.MidiFile(ticks_per_beat=480, type=0)
+            track = mido.MidiTrack()
+            midi_file.tracks.append(track)
+            
+            # Recording state
+            recording = False
+            last_message_time = time.time()
+            silence_threshold = 2.0  # seconds of silence to trigger processing
+            
+            # Listen for messages
+            while True: #TODO Fix this loop 
+                msg = inport.receive(block=False)
+                current_time = time.time()
+                
+                if msg is not None:
+                    print(f"Received: {msg}")
+                    last_message_time = current_time
+                    
+                    # Start recording on first note_on
+                    if msg.type == 'note_on' and msg.velocity > 0:
+                        if not recording:
+                            recording = True
+                            print("Recording started...")
+                            track = mido.MidiTrack()
+                            midi_file.tracks = [track]
+                    
+                    # Add message to track if we're recording
+                    if recording:
+                        track.append(msg)
+                
+                # Process after silence
+                if recording and (current_time - last_message_time) > silence_threshold:
+                    print("Silence detected, processing recording...")
+                    recording = False
+                    
+                    # Save to temporary file
+                    file = BytesIO()
+                    file.name = "temp.mid"
+                   
+                    midi_file.save(file)
+                    
+                    # Process the MIDI data
+                    process_midi(model, file, generation_config, tokenizer, save_path=args.save_path)
+                    
+                    # Clean up
+                    os.close(file)
+                
+                # Prevent high CPU usage
+                time.sleep(0.01)
+    
+    except KeyboardInterrupt:
+        print("MIDI input monitoring stopped.")
+    except Exception as e:
+        print(f"Error reading MIDI input: {e}")
 
 
 
