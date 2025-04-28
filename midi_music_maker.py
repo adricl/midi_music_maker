@@ -7,9 +7,6 @@
 
 ### What else needs to be done
 # Convert to midi input and output using the midi cables
-# with mido.open_input(port_name) as inport:
-# sudo apt install libasound2-dev
-# sudo usermod -a -G audio $USER
 
 import os
 import errno
