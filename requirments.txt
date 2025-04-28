@@ -3,3 +3,4 @@ mido
 symusic
 miditok
 transformers
+rtmidi
