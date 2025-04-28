@@ -13,3 +13,11 @@ The tokens are encoded using a custom MidiTok Remi encoding.
 [Single instrument trained model](https://huggingface.co/adricl/midi_single_instrument_mistral_transformer)
 
 [Multi instrument trained model](https://huggingface.co/adricl/music_transformer_playground)
+
+
+## Linux installation requirements.
+python-dev
+libasound2-dev
+
+To setup the audio
+sudo usermod -a -G audio $USER
