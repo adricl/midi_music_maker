@@ -3,4 +3,4 @@ mido
 symusic
 miditok
 transformers
-rtmidi
+python-rtmidi
