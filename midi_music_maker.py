@@ -122,7 +122,7 @@ def midi_input_to_midi():
                 msg = inport.receive(block=False)
                 current_time = time.time()
                 
-                if msg is not None:
+                if msg is not None or msg.type != 'clock':
                     print(f"Received: {msg}")
                     last_message_time = current_time
                     
