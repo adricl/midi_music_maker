@@ -122,7 +122,7 @@ def midi_input_to_midi():
                 msg = inport.receive(block=False)
                 current_time = time.time()
                 
-                if msg is not None or msg.type != 'clock':
+                if msg is not None and msg.type != 'clock':
                     print(f"Received: {msg}")
                     last_message_time = current_time
                     
@@ -144,17 +144,19 @@ def midi_input_to_midi():
                     recording = False
                     
                     # Save to temporary file
-                    file = BytesIO()
-                    file.name = "temp.mid"
+                    mem_file = BytesIO()
+                    mem_file.name = "temp.mid"
                    
-                    midi_file.save(file)
-                    file.seek(0)
+                    midi_file.save(file=mem_file)
+                    mem_file.seek(0)
                     
-                    # Process the MIDI data
-                    process_midi(model, file.read(), generation_config, tokenizer, save_path=args.save_path)
-                    
-                    # Clean up
+                    mem_file_data = mem_file.read()
                     os.close(file)
+
+                    print(mem_file_data)
+                    # Process the MIDI data
+                    process_midi(model, mem_file_data, generation_config, tokenizer, save_path=args.save_path)
+                    print("Processing complete.")
                 
                 # Prevent high CPU usage
                 time.sleep(0.01)
