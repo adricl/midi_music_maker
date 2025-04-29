@@ -151,7 +151,7 @@ def midi_input_to_midi():
                     mem_file.seek(0)
                     
                     mem_file_data = mem_file.read()
-                    os.close(file)
+                    os.close(mem_file)
 
                     print(mem_file_data)
                     # Process the MIDI data
