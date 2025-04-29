@@ -151,12 +151,13 @@ def midi_input_to_midi():
                     mem_file.seek(0)
                     
                     mem_file_data = mem_file.read()
-                    os.close(mem_file)
+                    
 
                     print(mem_file_data)
                     # Process the MIDI data
                     process_midi(model, mem_file_data, generation_config, tokenizer, save_path=args.save_path)
                     print("Processing complete.")
+                    os.close(mem_file)
                 
                 # Prevent high CPU usage
                 time.sleep(0.01)
