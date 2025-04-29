@@ -148,9 +148,10 @@ def midi_input_to_midi():
                     file.name = "temp.mid"
                    
                     midi_file.save(file)
+                    file.seek(0)
                     
                     # Process the MIDI data
-                    process_midi(model, file, generation_config, tokenizer, save_path=args.save_path)
+                    process_midi(model, file.read(), generation_config, tokenizer, save_path=args.save_path)
                     
                     # Clean up
                     os.close(file)
