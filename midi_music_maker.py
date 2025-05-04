@@ -16,15 +16,17 @@ from io import BytesIO
 import argparse
 import torch
 import mido
+from mido import MidiFile
 from symusic import Score
 from miditok import REMI
 from transformers import AutoModelForCausalLM, GenerationConfig, AutoConfig
 
 # Commandline Args python midi_music_maker.py "/home/wombat/Documents/projects/music/midiTok/data/HuggingFace_Mistral_Transformer_Single_Instrument/run" "/media/wombat/c6928dc9-ba03-411d-9483-8e28df5973b9/Music Data/HuggingFace_Mistral_Transformer_Single_Instrument/HuggingFace_Mistral_Transformer_Single_Instrument.json" "/home/wombat/Documents/projects/music/hf_music_transformer_playground"
 
-def process_midi(model, inp, generation_config, tokenizer, save_path="./bloop.mid"):
+def process_midi(model, inp, generation_config, tokenizer, save_path):
     
     start_time = time.time()
+
     score = Score.from_midi(inp)
 
     print("Processing midi file")
@@ -51,8 +53,26 @@ def process_midi(model, inp, generation_config, tokenizer, save_path="./bloop.mi
     print("Generated Output Shape", res.shape)
 
     decoded = tokenizer.decode([res[0]])
-    decoded.dump_midi(save_path)
+
+    file_path = Path(save_path) / f"{time.time()}_generated.mid"
+    decoded.dump_midi(file_path)
     print('Duration: {}'.format(time.time() - start_time))
+    print(f"Decoded shape: {decoded.shape}")
+
+    midi_to_output_midi(file_path)
+
+
+def midi_to_output_midi(midi_file):
+    output_port = find_midi_output_device()
+    try:
+        with mido.open_output(output_port) as outport:
+            # Play MIDI file - this uses the time values in the MIDI file
+            for msg in MidiFile(midi_file).play():
+                if not msg.is_meta:  # Skip meta messages
+                    outport.send(msg)
+                    print(f"Sent: {msg}")
+    except Exception as e:
+        print(f"Error sending MIDI to output device: {e}")
 
 def pipe_to_midi(pipe_name):
     
@@ -85,37 +105,54 @@ def pipe_to_midi(pipe_name):
         print("Pipe removed")
         exit(0)
 
-def find_midi_device():
+def find_midi_input_device():
     print("Searching for MIDI devices...")
     input_ports = mido.get_input_names()
     
-    for port in input_ports:
+    port = find_usb_midi_device(input_ports)
+    if port is not None:
         print(f"Found MIDI input port: {port}")
-        if "USB" in port:
-            print(f"Using MIDI input port: {port}")
-            return port
+        return port
+
         
     print("No suitable MIDI input device found.")
     exit(1)
 
+def find_midi_output_device():
+    print("Searching for MIDI devices...")
+    output_ports = mido.get_output_names()
+    
+    port = find_usb_midi_device(output_ports)
+    if port is not None:
+        print(f"Found MIDI output port: {port}")
+        return port
+        
+    print("No suitable MIDI output device found.")
+    exit(1)
+
+def find_usb_midi_device(ports):
+    for port in ports:
+        if "USB" in port:
+            return port
+    return None
+
+
 def midi_input_to_midi():
     print("Waiting for midi input...")
-    
-    port_name = find_midi_device()
+
+    silence_threshold = 2.0  # seconds of silence to trigger processing
+    port_name = find_midi_input_device()
     
     try:
         with mido.open_input(port_name) as inport:
             print("MIDI device connected! Start playing...")
             
             # Create a MIDI file to collect messages
-            midi_file = mido.MidiFile(ticks_per_beat=480, type=0)
-            track = mido.MidiTrack()
-            midi_file.tracks.append(track)
+            midi_file = create_midi_file()
             
             # Recording state
             recording = False
             last_message_time = time.time()
-            silence_threshold = 2.0  # seconds of silence to trigger processing
             
             # Listen for messages
             while True: #TODO Fix this loop 
@@ -151,23 +188,33 @@ def midi_input_to_midi():
                     mem_file.seek(0)
                     
                     mem_file_data = mem_file.read()
-                    
+
+                    mem_file.seek(0)
+                    with open(Path(args.save_path) / f"{time.time()}_played.mid", "wb") as f:
+                        f.write(mem_file.read())
 
                     print(mem_file_data)
                     # Process the MIDI data
                     process_midi(model, mem_file_data, generation_config, tokenizer, save_path=args.save_path)
                     print("Processing complete.")
-                    os.close(mem_file)
-                
-                # Prevent high CPU usage
-                time.sleep(0.01)
+                    mem_file.close()
+
+                    midi_file = create_midi_file()
+                    last_message_time = time.time()
+                    recording = False
     
     except KeyboardInterrupt:
         print("MIDI input monitoring stopped.")
     except Exception as e:
         print(f"Error reading MIDI input: {e}")
 
-
+def create_midi_file():
+    # Create a new MIDI file
+    midi_file = mido.MidiFile(ticks_per_beat=480, type=0)
+    track = mido.MidiTrack()
+    midi_file.tracks.append(track)
+    
+    return midi_file
 
 if __name__ == "__main__":
 
