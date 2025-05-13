@@ -57,7 +57,7 @@ def process_midi(model, inp, generation_config, tokenizer, save_path):
     file_path = Path(save_path) / f"{time.time()}_generated.mid"
     decoded.dump_midi(file_path)
     print('Duration: {}'.format(time.time() - start_time))
-    print(f"Decoded shape: {decoded.shape}")
+    print(f"Decoded shape: {decoded}")
 
     midi_to_output_midi(file_path)
 
@@ -68,7 +68,8 @@ def midi_to_output_midi(midi_file):
         with mido.open_output(output_port) as outport:
             # Play MIDI file - this uses the time values in the MIDI file
             for msg in MidiFile(midi_file).play():
-                if not msg.is_meta:  # Skip meta messages
+                type = msg.dict()['type']
+                if not (msg.is_meta or type == 'program_change'):  # Skip meta messages
                     outport.send(msg)
                     print(f"Sent: {msg}")
     except Exception as e:
@@ -140,7 +141,7 @@ def find_usb_midi_device(ports):
 def midi_input_to_midi():
     print("Waiting for midi input...")
 
-    silence_threshold = 2.0  # seconds of silence to trigger processing
+    silence_threshold = 5.0  # seconds of silence to trigger processing
     port_name = find_midi_input_device()
     
     try:
