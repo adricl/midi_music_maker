@@ -17,11 +17,20 @@ import argparse
 import torch
 import mido
 from mido import MidiFile
-from symusic import Score # type: ignore
-from miditok import REMI # type: ignore
-from transformers import AutoModelForCausalLM, GenerationConfig, AutoConfig # type: ignore
+from symusic import Score
+from miditok import REMI
+from transformers import AutoModelForCausalLM, GenerationConfig, AutoConfig
 
 # Commandline Args python midi_music_maker.py "/home/wombat/Documents/projects/music/midiTok/data/HuggingFace_Mistral_Transformer_Single_Instrument/run" "/media/wombat/c6928dc9-ba03-411d-9483-8e28df5973b9/Music Data/HuggingFace_Mistral_Transformer_Single_Instrument/HuggingFace_Mistral_Transformer_Single_Instrument.json" "/home/wombat/Documents/projects/music/hf_music_transformer_playground"
+
+#Global Variables
+
+#Default MIDI file parameters
+TICKS_PER_BEAT = 480
+DEFAULT_TEMPO = 500000  # Microseconds per beat (120 BPM)
+
+SILENCE_THRESHOLD = 5.0  # seconds of silence to trigger processing
+
 
 def process_midi(model, inp, generation_config, tokenizer, save_path):
 
@@ -142,20 +151,47 @@ def find_usb_midi_device(ports):
             return port
     return None
 
+def start_new_recording():
+    midi_file = mido.MidiFile(ticks_per_beat=TICKS_PER_BEAT)
+    track = mido.MidiTrack()
+    midi_file.tracks.append(track)
+
+    # Add initial tempo message. Its time is 0 as it's the first in this track.
+    track.append(mido.MetaMessage('set_tempo', tempo=DEFAULT_TEMPO, time=0))
+
+    return midi_file, track
+
+def save_process_recording(midi_file):
+    # Save to temporary BytesIO stream
+    mem_file = BytesIO()
+    mem_file.name = "temp_recorded.mid"
+    midi_file.save(file=mem_file)
+    mem_file.seek(0) # Rewind to start of stream for reading
+
+    mem_file_data = mem_file.read() # Read data for process_midi
+
+    # Save the recorded MIDI to a file for inspection/debugging (optional)
+    mem_file.seek(0) # Rewind again to read for saving to disk
+    played_midi_path = Path(args.save_path) / f"{time.time()}_played.mid"
+    with open(played_midi_path, "wb") as f:
+        f.write(mem_file.read())
+    print(f"Saved played MIDI to: {played_midi_path}")
+
+    print(mem_file_data)
+
+    # Process the MIDI data (pass bytes)
+    process_midi(model, mem_file_data, generation_config, tokenizer, save_path=args.save_path)
+    print("Processing complete.")
+    mem_file.close()
 
 def midi_input_to_midi():
     print("Waiting for midi input...")
 
-    silence_threshold = 5.0  # seconds of silence to trigger processing
     port_name = find_midi_input_device()
 
     if port_name is None:
         print("Exiting due to no MIDI input device found.")
         exit(1)
-
-    # MIDI file parameters
-    TICKS_PER_BEAT = 480
-    DEFAULT_TEMPO = 500000  # Microseconds per beat (120 BPM)
 
     # State variables for recording
     midi_file = None  # Will be mido.MidiFile object when recording
@@ -182,14 +218,7 @@ def midi_input_to_midi():
                             print("Recording started...")
                             recording = True
 
-                            # Initialize a new MIDI file and track for this recording segment
-                            midi_file = mido.MidiFile(ticks_per_beat=TICKS_PER_BEAT)
-                            track = mido.MidiTrack()
-                            midi_file.tracks.append(track)
-
-                            # Add initial tempo message. Its time is 0 as it's the first in this track.
-                            track.append(mido.MetaMessage('set_tempo', tempo=DEFAULT_TEMPO, time=0))
-
+                            midi_file, track = start_new_recording()
                             # The time of this first "event" (the tempo message) is current_event_time_abs.
                             # Subsequent actual MIDI messages will be timed relative to this moment.
                             time_of_last_track_event_abs = current_event_time_abs
@@ -200,49 +229,24 @@ def midi_input_to_midi():
                             print("Error: Recording is true but track/midi_file is not initialized.")
                             # This state should ideally not be reached if logic is correct.
                         else:
+                            message_for_track = msg.copy()
                             # Calculate delta time in seconds since the last event *added to the track*
                             delta_seconds = current_event_time_abs - time_of_last_track_event_abs
+                            delta_ticks = mido.second2tick(delta_seconds, midi_file.ticks_per_beat, DEFAULT_TEMPO)
 
-                            delta_ticks = mido.second2tick(delta_seconds,
-                                                           midi_file.ticks_per_beat,
-                                                           DEFAULT_TEMPO)
-
-                            # Create a new message instance to set our calculated delta time.
                             # msg.time from inport.receive() is delta from previous *port* message, not what we need here.
-                            message_for_track = msg.copy()
                             message_for_track.time = int(round(delta_ticks)) # MIDI ticks must be integers
-
                             track.append(message_for_track)
 
                             # Update the absolute time of the last recorded event in the track
                             time_of_last_track_event_abs = current_event_time_abs
 
                 # Process after silence
-                if recording and (current_event_time_abs - last_message_time) > silence_threshold:
+                if recording and (current_event_time_abs - last_message_time) > SILENCE_THRESHOLD:
                     print("Silence detected, processing recording...")
 
                     if midi_file: # Ensure midi_file exists (it should if recording was true)
-                        # Save to temporary BytesIO stream
-                        mem_file = BytesIO()
-                        mem_file.name = "temp_recorded.mid"
-                        midi_file.save(file=mem_file)
-                        mem_file.seek(0) # Rewind to start of stream for reading
-
-                        mem_file_data = mem_file.read() # Read data for process_midi
-
-                        # Save the recorded MIDI to a file for inspection/debugging (optional)
-                        mem_file.seek(0) # Rewind again to read for saving to disk
-                        played_midi_path = Path(args.save_path) / f"{time.time()}_played.mid"
-                        with open(played_midi_path, "wb") as f:
-                            f.write(mem_file.read())
-                        print(f"Saved played MIDI to: {played_midi_path}")
-
-                        # print(mem_file_data) # Commented out: prints raw bytes, very verbose
-
-                        # Process the MIDI data (pass bytes)
-                        process_midi(model, mem_file_data, generation_config, tokenizer, save_path=args.save_path)
-                        print("Processing complete.")
-                        mem_file.close()
+                        save_process_recording(midi_file)
 
                     # Reset state for the next recording segment
                     recording = False
