@@ -54,6 +54,7 @@ def process_midi(model, inp, generation_config, tokenizer, save_path):
 
     tensor_sequence = torch.tensor([input_ids], dtype=torch.long)
     print(f"Current tensor shape: {tensor_sequence.shape}")
+    input_token_length = tensor_sequence.shape[1]
 
     res = model.generate(
         inputs=tensor_sequence,
@@ -61,7 +62,7 @@ def process_midi(model, inp, generation_config, tokenizer, save_path):
 
     print("Generated Output Shape", res.shape)
 
-    decoded = tokenizer.decode([res[0]])
+    decoded = tokenizer.decode([res[0][input_token_length:]])
 
     file_path = Path(save_path) / f"{time.time()}_generated.mid"
     decoded.dump_midi(file_path)
