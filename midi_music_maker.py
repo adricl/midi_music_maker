@@ -200,12 +200,17 @@ def midi_input_to_midi():
     recording = False
     last_message_time = time.time()  # For silence detection
     time_of_last_track_event_abs = 0.0  # Absolute time of the last event added to the current track
+    inport = mido.open_input(port_name)
 
     try:
-        with mido.open_input(port_name) as inport:
+        #with mido.open_input(port_name) as inport: #move this
             print(f"MIDI device '{port_name}' connected! Start playing...")
 
             while True: # Main loop for receiving messages
+                if (not inport.is_open):
+                    print(f"Reopening MIDI input port: {port_name}")
+                    inport = mido.open_input(port_name)
+
                 msg = inport.receive(block=False) # Non-blocking receive
                 current_event_time_abs = time.time() # Get time for this potential event
 
@@ -247,6 +252,7 @@ def midi_input_to_midi():
                     print("Silence detected, processing recording...")
 
                     if midi_file: # Ensure midi_file exists (it should if recording was true)
+                        inport.close()  # Close the input port to stop receiving messages
                         save_process_recording(midi_file)
 
                     # Reset state for the next recording segment
@@ -257,10 +263,11 @@ def midi_input_to_midi():
                     # Reset last_message_time to current time to base silence detection correctly for post-processing period
                     last_message_time = time.time()
 
-
     except KeyboardInterrupt:
+        inport.close()
         print("MIDI input monitoring stopped.")
     except Exception as e:
+        inport.close()
         print(f"Error reading MIDI input: {e}")
         import traceback
         traceback.print_exc()
