@@ -24,23 +24,7 @@ sudo usermod -a -G audio $USER
 
 ## Logic for the processing of midi input.
 
-1. Callback reads the MIDI input from the device in a thread that keeps reading it and saving it to a file.
-2. Once there is a pause of the input for 5 seconds we then process the file through the LLM on a different thread from the input reading thread.
-3. While the processing is occuring we need to change the file we are writing to. Once the processing is done we need to write to another new file. 
-
-
-Global Variables
-last_midi_input_time
-midi_input_file
- 
-
-Callback 
-Records midi inputs. 
-For each input we need to set a timestamp variable to the current time.
-takes the file it will need to write out to from the global variable.
-
-Main loop,
-
-detect if the last midi input time is more than 5 seconds ago and if it is process the file.
-When processing a new file we need to 
+1. Callback reads the MIDI input from the device and puts it into a buffer
+2. Once there is a pause of the input for 5 seconds we then copy the buffer and write it to a file then process it via the LLM.
+3. The LLM will then ouptut the next few notes.
 
