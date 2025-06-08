@@ -5,8 +5,6 @@
 # It will take in input of midi music and run it via a MIDI LLM transformer to
 # output the next few notes via midi.
 
-### What else needs to be done
-# Convert to midi input and output using the midi cables
 
 import os
 import errno
@@ -49,7 +47,7 @@ def process_midi(model, inp, generation_config, tokenizer, save_path):
     input_ids = tokenized_input[0].ids
     if len(input_ids) >= max_len:
         print(f"Warning: Input sequence ({len(input_ids)}) longer than max_position_embeddings ({max_len}). Truncating.")
-        input_ids = input_ids[-(max_len - 1):]
+        input_ids = input_ids[-max_len:]
 
 
     tensor_sequence = torch.tensor([input_ids], dtype=torch.long)
@@ -170,7 +168,8 @@ def save_buffer_and_process_recording(message_buffer):
     
     midi_file, track = create_new_midi_file()
     # Maybe add code here to get the first message in the buffer that is msg.type == 'note_on' and msg.velocity > 0:
-    track.append(message_buffer)
+    for msg in message_buffer:
+        track.append(msg)
 
     # Save to temporary BytesIO stream
     mem_file = BytesIO()
@@ -204,20 +203,19 @@ def midi_input_to_midi():
         exit(1)
 
     # State variables for recording
-    time_of_last_track_event_abs = 0.0  # Absolute time of the last event added to the current track
-    current_event_time_abs = 0.0  # Current absolute time for the event being processed
-    message_buffer = []  # Buffer for incoming messages
+    time_of_last_event_in_buffer = 0.0  # Absolute time of the last event added to the current track
+    _message_buffer = []  # Buffer for incoming messages Underscore to indicate it's managed by this function and its callback
 
     try:
-        mido.open_input(port_name, callback=midi_input_callback)
+        inport = mido.open_input(port_name, callback=midi_input_callback)
         print(f"MIDI device '{port_name}' connected! Start playing...")
 
         while True:
-            if (time.time() - current_event_time_abs) > SILENCE_THRESHOLD:
-                buffer = message_buffer.copy()  # Copy current buffer to process
-                message_buffer.clear()  # Clear the buffer for new messages
+            if _message_buffer and (time.time() - time_of_last_event_in_buffer) > SILENCE_THRESHOLD:
+                buffer = _message_buffer.copy()  # Copy current buffer to process
+                _message_buffer.clear()  # Clear the buffer for new messages
                 save_buffer_and_process_recording(buffer)
-                message_buffer.clear()  # Clear the buffer after processing so we dont get junk in the next recording TODO: might think of something smarter to do here.
+                _message_buffer.clear()  # Clear the buffer after processing so we dont get junk in the next recording TODO: might think of something smarter to do here.
 
     except KeyboardInterrupt:
         print("MIDI input monitoring stopped.")
@@ -225,27 +223,35 @@ def midi_input_to_midi():
         print(f"Error reading MIDI input: {e}")
         import traceback
         traceback.print_exc()
+    finally:
+        if inport and not inport.closed:
+            print(f"Closing MIDI port '{port_name}'.")
+            inport.close()
     
     def midi_input_callback(msg):
+        nonlocal time_of_last_event_in_buffer, _message_buffer
         if msg is not None and msg.type != 'clock': # Ignore clock messages
             
             current_event_time_abs = time.time() # Update for silence detection
 
-            if message_buffer is []:
-                time_of_last_track_event_abs = current_event_time_abs
+            if _message_buffer is []:
+                time_of_last_event_in_buffer = current_event_time_abs
 
             # Start recording on first note_on message
             message_for_track = msg.copy()
             # Calculate delta time in seconds since the last event *added to the track*
-            delta_seconds = current_event_time_abs - time_of_last_track_event_abs
+            delta_seconds = current_event_time_abs - time_of_last_event_in_buffer
+            if delta_seconds < 0: # Should not happen with time.time() but good for robustness
+                delta_seconds = 0.0
+
             delta_ticks = mido.second2tick(delta_seconds, TICKS_PER_BEAT, DEFAULT_TEMPO)
 
             # msg.time from inport.receive() is delta from previous *port* message, not what we need here.
             message_for_track.time = int(round(delta_ticks)) # MIDI ticks must be integers
-            message_buffer.append(message_for_track)
+            _message_buffer.append(message_for_track)
             print(f"Received: {message_for_track}")
             # Update the absolute time of the last recorded event in the track
-            time_of_last_track_event_abs = current_event_time_abs
+            time_of_last_event_in_buffer = current_event_time_abs
 
 
 # Removed create_midi_file function as its logic is now inlined
