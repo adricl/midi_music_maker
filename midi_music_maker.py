@@ -79,8 +79,7 @@ def midi_to_output_midi(midi_file):
         with mido.open_output(output_port) as outport:
             # Play MIDI file - this uses the time values in the MIDI file
             for msg in MidiFile(midi_file).play():
-                type = msg.dict()['type']
-                if not (msg.is_meta or type == 'program_change'):  # Skip meta messages and program_change
+                if not (msg.is_meta or msg.type == 'program_change'):  # Skip meta messages and program_change
                     outport.send(msg)
                     print(f"Sent: {msg}")
     except Exception as e:
@@ -206,6 +205,32 @@ def midi_input_to_midi():
     time_of_last_event_in_buffer = 0.0  # Absolute time of the last event added to the current track
     _message_buffer = []  # Buffer for incoming messages Underscore to indicate it's managed by this function and its callback
 
+    def midi_input_callback(msg):
+        nonlocal time_of_last_event_in_buffer, _message_buffer
+        if msg is not None and msg.type != 'clock': # Ignore clock messages
+            
+            current_event_time_abs = time.time() # Update for silence detection
+
+            if not _message_buffer or len(_message_buffer) == 0:
+                time_of_last_event_in_buffer = current_event_time_abs
+
+            # Start recording on first note_on message
+            message_for_track = msg.copy()
+            # Calculate delta time in seconds since the last event *added to the track*
+            delta_seconds = current_event_time_abs - time_of_last_event_in_buffer
+            if delta_seconds < 0: # Should not happen with time.time() but good for robustness
+                delta_seconds = 0.0
+
+            delta_ticks = mido.second2tick(delta_seconds, TICKS_PER_BEAT, DEFAULT_TEMPO)
+
+            # msg.time from inport.receive() is delta from previous *port* message, not what we need here.
+            message_for_track.time = int(round(delta_ticks)) # MIDI ticks must be integers
+            _message_buffer.append(message_for_track)
+            print(f"Received: {message_for_track}")
+            # Update the absolute time of the last recorded event in the track
+            time_of_last_event_in_buffer = current_event_time_abs
+
+    inport = None  # Initialize inport to None to ensure it's defined in the finally block
     try:
         inport = mido.open_input(port_name, callback=midi_input_callback)
         print(f"MIDI device '{port_name}' connected! Start playing...")
@@ -227,34 +252,7 @@ def midi_input_to_midi():
         if inport and not inport.closed:
             print(f"Closing MIDI port '{port_name}'.")
             inport.close()
-    
-    def midi_input_callback(msg):
-        nonlocal time_of_last_event_in_buffer, _message_buffer
-        if msg is not None and msg.type != 'clock': # Ignore clock messages
-            
-            current_event_time_abs = time.time() # Update for silence detection
 
-            if _message_buffer is []:
-                time_of_last_event_in_buffer = current_event_time_abs
-
-            # Start recording on first note_on message
-            message_for_track = msg.copy()
-            # Calculate delta time in seconds since the last event *added to the track*
-            delta_seconds = current_event_time_abs - time_of_last_event_in_buffer
-            if delta_seconds < 0: # Should not happen with time.time() but good for robustness
-                delta_seconds = 0.0
-
-            delta_ticks = mido.second2tick(delta_seconds, TICKS_PER_BEAT, DEFAULT_TEMPO)
-
-            # msg.time from inport.receive() is delta from previous *port* message, not what we need here.
-            message_for_track.time = int(round(delta_ticks)) # MIDI ticks must be integers
-            _message_buffer.append(message_for_track)
-            print(f"Received: {message_for_track}")
-            # Update the absolute time of the last recorded event in the track
-            time_of_last_event_in_buffer = current_event_time_abs
-
-
-# Removed create_midi_file function as its logic is now inlined
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
