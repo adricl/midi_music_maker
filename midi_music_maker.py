@@ -1,9 +1,9 @@
 ###
 # MIDI Music Maker
-# The Midi Music Maker will complete music for you.
-# Just give it a few notes and it will generate the next few notes.
-# It will take in input of midi music and run it via a MIDI LLM transformer to
-# output the next few notes via midi.
+#
+# This script uses a transformer model to generate musical sequences in real-time
+# based on live MIDI input or data from a named pipe.
+###
 
 
 import os
@@ -21,7 +21,7 @@ from transformers import AutoModelForCausalLM, GenerationConfig, AutoConfig
 
 # Commandline Args python midi_music_maker.py "/home/wombat/Documents/projects/music/midiTok/data/HuggingFace_Mistral_Transformer_Single_Instrument/run" "/media/wombat/c6928dc9-ba03-411d-9483-8e28df5973b9/Music Data/HuggingFace_Mistral_Transformer_Single_Instrument/HuggingFace_Mistral_Transformer_Single_Instrument.json" "/home/wombat/Documents/projects/music/hf_music_transformer_playground"
 
-#Global Variables
+# --- Global Constants ---
 
 #Default MIDI file parameters
 TICKS_PER_BEAT = 480
@@ -30,7 +30,11 @@ DEFAULT_TEMPO = 500000  # Microseconds per beat (120 BPM)
 SILENCE_THRESHOLD = 5.0  # seconds of silence to trigger processing
 
 
-def process_midi(model, inp, generation_config, tokenizer, save_path):
+def generate_and_play_midi(model, inp, generation_config, tokenizer, save_path, output_midi_port):
+    """
+    Generates new MIDI data from an input sequence using the transformer model,
+    saves it, and plays it back.
+    """
 
     start_time = time.time()
 
@@ -43,6 +47,7 @@ def process_midi(model, inp, generation_config, tokenizer, save_path):
     print(f"Max position embeddings: {model.config.max_position_embeddings}")
     max_len = 1024 #TODO for now as we are using a smaller model
 
+    # Truncate input if it exceeds the model's maximum context length   
     print(f"Tokenized input shape: {len(tokenized_input[0].ids)}")
     input_ids = tokenized_input[0].ids
     if len(input_ids) >= max_len:
@@ -54,12 +59,13 @@ def process_midi(model, inp, generation_config, tokenizer, save_path):
     print(f"Current tensor shape: {tensor_sequence.shape}")
     input_token_length = tensor_sequence.shape[1]
 
+    # Generate the new token sequence
     res = model.generate(
         inputs=tensor_sequence,
         generation_config=generation_config)
 
     print("Generated Output Shape", res.shape)
-
+    # Decode the generated tokens (excluding the input part)
     decoded = tokenizer.decode([res[0][input_token_length:]])
 
     file_path = Path(save_path) / f"{time.time()}_generated.mid"
@@ -67,16 +73,12 @@ def process_midi(model, inp, generation_config, tokenizer, save_path):
     print('Duration: {}'.format(time.time() - start_time))
     print(f"Decoded shape: {decoded}") # Note: `decoded` is a Score object, printing it might be verbose.
 
-    midi_to_output_midi(file_path)
+    midi_to_output_midi(file_path, output_midi_port)
 
 
-def midi_to_output_midi(midi_file):
-    output_port = find_midi_output_device()
-    if output_port is None:
-        print("No MIDI output device found or specified. Skipping playback.")
-        return
+def midi_to_output_midi(midi_file, output_midi_port):
     try:
-        with mido.open_output(output_port) as outport:
+        with mido.open_output(output_midi_port) as outport:
             # Play MIDI file - this uses the time values in the MIDI file
             for msg in MidiFile(midi_file).play():
                 if not (msg.is_meta or msg.type == 'program_change'):  # Skip meta messages and program_change
@@ -85,8 +87,7 @@ def midi_to_output_midi(midi_file):
     except Exception as e:
         print(f"Error sending MIDI to output device: {e}")
 
-def pipe_to_midi(pipe_name):
-
+def handle_pipe_input(pipe_name, model, generation_config, tokenizer, save_path, output_midi_port):
     try:
         if (os.path.exists(pipe_name)):
             print("Pipe already exists, removing...")
@@ -109,7 +110,7 @@ def pipe_to_midi(pipe_name):
                         break
                     else:
                         # Ensure global variables are accessible or passed if needed
-                        process_midi(model, data, generation_config, tokenizer, save_path=args.save_path)
+                        generate_and_play_midi(model, data, generation_config, tokenizer, save_path, output_midi_port)
 
     except KeyboardInterrupt:
         print("Stopping...")
@@ -117,11 +118,11 @@ def pipe_to_midi(pipe_name):
         print("Pipe removed")
         exit(0)
 
-def find_midi_input_device():
+def find_midi_input_device(input_device_name):
     print("Searching for MIDI input devices...")
     input_ports = mido.get_input_names()
 
-    port = find_usb_midi_device(input_ports)
+    port = find_usb_midi_device(input_ports, input_device_name)
     if port is not None:
         print(f"Found MIDI input port: {port}")
         return port
@@ -130,22 +131,22 @@ def find_midi_input_device():
     exit(1)
 
 
-def find_midi_output_device():
+def find_midi_output_device(output_device_name):
     print("Searching for MIDI output devices...")
     output_ports = mido.get_output_names()
 
-    port = find_usb_midi_device(output_ports)
+    port = find_usb_midi_device(output_ports, output_device_name)
     if port is not None:
         print(f"Found MIDI output port: {port}")
         return port
-
+    
     print("No suitable MIDI output device found. Please connect a USB MIDI device.")
     exit(1)
 
 
-def find_usb_midi_device(ports):
+def find_usb_midi_device(ports, device_name):
     for port in ports:
-        if "USB" in port: # Check if the port name contains "USB"
+        if device_name in port: # Check if the port name contains device_name
             return port
     return None
 
@@ -159,7 +160,7 @@ def create_new_midi_file():
 
     return midi_file, track
 
-def save_buffer_and_process_recording(message_buffer):
+def save_buffer_and_process_recording(message_buffer, model, generation_config, tokenizer, save_path, output_midi_port):
 
     if message_buffer is None or len(message_buffer) == 0:
         print("No messages to process, skipping...")
@@ -180,7 +181,7 @@ def save_buffer_and_process_recording(message_buffer):
 
     # Save the recorded MIDI to a file for inspection/debugging (optional)
     mem_file.seek(0) # Rewind again to read for saving to disk
-    played_midi_path = Path(args.save_path) / f"{time.time()}_played.mid"
+    played_midi_path = Path(save_path) / f"{time.time()}_played.mid"
     with open(played_midi_path, "wb") as f:
         f.write(mem_file.read())
     print(f"Saved played MIDI to: {played_midi_path}")
@@ -188,18 +189,18 @@ def save_buffer_and_process_recording(message_buffer):
     print(mem_file_data)
 
     # Process the MIDI data (pass bytes)
-    process_midi(model, mem_file_data, generation_config, tokenizer, save_path=args.save_path)
+    generate_and_play_midi(model, mem_file_data, generation_config, tokenizer, save_path, output_midi_port)
     print("Processing complete.")
     mem_file.close()
 
-def midi_input_to_midi():
+def handle_realtime_midi_input(model, generation_config, tokenizer, save_path, input_midi_port, output_midi_port):
+    """
+
+    Listens for real-time MIDI input, records it, and triggers generation
+    after a period of silence.
+    """
+
     print("Waiting for midi input...")
-
-    port_name = find_midi_input_device()
-
-    if port_name is None:
-        print("Exiting due to no MIDI input device found.")
-        exit(1)
 
     # State variables for recording
     time_of_last_event_in_buffer = 0.0  # Absolute time of the last event added to the current track
@@ -232,14 +233,14 @@ def midi_input_to_midi():
 
     inport = None  # Initialize inport to None to ensure it's defined in the finally block
     try:
-        inport = mido.open_input(port_name, callback=midi_input_callback)
-        print(f"MIDI device '{port_name}' connected! Start playing...")
+        inport = mido.open_input(input_midi_port, callback=midi_input_callback)
+        print(f"MIDI device '{input_midi_port}' connected! Start playing...")
 
         while True:
             if _message_buffer and (time.time() - time_of_last_event_in_buffer) > SILENCE_THRESHOLD:
                 buffer = _message_buffer.copy()  # Copy current buffer to process
                 _message_buffer.clear()  # Clear the buffer for new messages
-                save_buffer_and_process_recording(buffer)
+                save_buffer_and_process_recording(buffer, model, generation_config, tokenizer, save_path)
                 _message_buffer.clear()  # Clear the buffer after processing so we dont get junk in the next recording TODO: might think of something smarter to do here.
 
     except KeyboardInterrupt:
@@ -250,36 +251,34 @@ def midi_input_to_midi():
         traceback.print_exc()
     finally:
         if inport and not inport.closed:
-            print(f"Closing MIDI port '{port_name}'.")
+            print(f"Closing MIDI port '{input_midi_port}'.")
             inport.close()
 
-
-if __name__ == "__main__":
+def main():
     parser = argparse.ArgumentParser(
         prog="midi_music_maker.py", 
         description="Generate midi audio real time "
     )
-    parser.add_argument("path_to_model", help="string path to model directory", type=str)
-    parser.add_argument("tokeniser_file", help="path to tokeniser json file", type=str)
-    parser.add_argument("save_path", help="path at which to save the generated midi file", type=str)
+    parser.add_argument("path_to_model", help="Path to the Hugging Face model directory.", type=str)
+    parser.add_argument("tokeniser_file", help="Path to the tokenizer JSON file.", type=str)
+    parser.add_argument("save_path", help="Directory to save generated MIDI files.", type=str)
+    parser.add_argument("-imp", "--input_midi_port", help="MIDI input port name to use for live MIDI input.", type=str, default=None)
+    parser.add_argument("-omp", "--output_midi_port", help="MIDI output port name to use for live MIDI output.", type=str, default=None)
     parser.add_argument("-v", "--verbose", help="verbose output flag", action="store_true")
-    parser.add_argument("-p", "--pipe_name", help="Pipe name", type=str)
-    parser.add_argument("-f", "--pipe_input", help="Input Midi from a pipe", action="store_true")
+    parser.add_argument("-p", "--pipe_name", help="Name of the pipe to use when --pipe_input is enabled.", type=str)
+    parser.add_argument("-f", "--pipe_input", help="Enable MIDI input from a named pipe instead of a live device.", action="store_true")
 
     args = parser.parse_args()
 
-    # fix arguments
-    pipe_name = args.pipe_name if args.pipe_name else "music_transfomer_pipe"
-
-    print(f"Model Path: {args.path_to_model}")
-    path_path_model = Path(args.path_to_model)
+    print(f"Input Midi Devices: {mido.get_input_names()}")
+    print(f"Output Midi Devices: {mido.get_output_names()}")
+    
+    output_midi_port_name = args.output_midi_port if args.output_midi_port else "USB"
+    output_midi_port = find_midi_output_device(output_midi_port_name)
 
     # It's generally safer to load Hugging Face models and configs directly from the directory path
     # if it's a saved model directory, rather than individual files like config.json or model.safetensors.
-    # However, if this structure is required by your setup, it's fine.
-    # For from_pretrained, usually the directory containing config.json and model files is enough.
-    
-    # Assuming path_to_model is the directory containing the model files (config.json, model.safetensors etc.)
+    print(f"Model Path: {args.path_to_model}")
     try:
         config = AutoConfig.from_pretrained(args.path_to_model)
         model = AutoModelForCausalLM.from_pretrained(args.path_to_model, config=config)
@@ -307,7 +306,14 @@ if __name__ == "__main__":
     )
 
     if (args.pipe_input):
+        pipe_name = args.pipe_name if args.pipe_name else "music_transfomer_pipe"
         print("Pipe input mode")
-        pipe_to_midi(pipe_name)
+        handle_pipe_input(pipe_name, model, generation_config, tokenizer, args.save_path, output_midi_port)
     else:
-        midi_input_to_midi()
+        input_midi_port_name = args.input_midi_port if args.input_midi_port else "USB"
+        input_midi_port = find_midi_input_device(input_midi_port_name)
+        handle_realtime_midi_input(model, generation_config, tokenizer, args.save_path, input_midi_port, output_midi_port)
+
+
+if __name__ == "__main__":
+    main()
