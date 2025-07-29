@@ -240,7 +240,7 @@ def handle_realtime_midi_input(model, generation_config, tokenizer, save_path, i
             if _message_buffer and (time.time() - time_of_last_event_in_buffer) > SILENCE_THRESHOLD:
                 buffer = _message_buffer.copy()  # Copy current buffer to process
                 _message_buffer.clear()  # Clear the buffer for new messages
-                save_buffer_and_process_recording(buffer, model, generation_config, tokenizer, save_path)
+                save_buffer_and_process_recording(buffer, model, generation_config, tokenizer, save_path, output_midi_port)
                 _message_buffer.clear()  # Clear the buffer after processing so we dont get junk in the next recording TODO: might think of something smarter to do here.
 
     except KeyboardInterrupt:
