@@ -1,6 +1,5 @@
-torch
 mido
 symusic
 miditok
-transformers
+transformers[torch]
 python-rtmidi
